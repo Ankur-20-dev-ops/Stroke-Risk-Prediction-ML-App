@@ -1,0 +1,187 @@
+---
+title: "Build and deploy a stroke prediction model using R"
+author: "Ankur Kumar"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+# About Data Analysis Report
+
+This RMarkdown file contains the report of the data analysis done for the project on building and deploying a stroke prediction model in R. It contains analysis such as data exploration, summary statistics and building the prediction models. The final report was completed on `r date()`. 
+
+**Data Description:**
+
+According to the World Health Organization (WHO) stroke is the 2nd leading cause of death globally, responsible for approximately 11% of total deaths.
+
+This data set is used to predict whether a patient is likely to get stroke based on the input parameters like gender, age, various diseases, and smoking status. Each row in the data provides relevant information about the patient.
+
+
+# Task One: Import data and data preprocessing
+
+## Load data and install packages
+
+```{r}
+# Install if needed
+install.packages(c("tidyverse", "skimr", "tidymodels", "mice", 
+                   "vip", "themis"))
+
+# Load libraries
+library(tidyverse)
+library(skimr)
+library(tidymodels)
+library(mice)
+library(themis)  # for class imbalance
+
+dataset <- read.csv("healthcare-dataset-stroke-data.csv")
+dataset$bmi <- as.numeric(dataset$bmi)
+
+str(dataset)
+
+```
+
+
+## Describe and explore the data
+
+```{r}
+#basic exploration 
+
+summary(dataset)
+skim(dataset)
+colSums(is.na(dataset))
+
+#check class imbalance
+table(dataset$stroke)
+
+#Data cleaning
+#Remove ID(not useful for prediction)
+dataset <- dataset %>% select(-id)
+
+#Convert categorical variables
+dataset <- dataset %>%
+  mutate(across(c(gender,ever_married,work_type,Residence_type,smoking_status,stroke),as.factor))
+
+#Handle Missing Values(BMI)
+#Better approach(multiple imputation using mice)
+imputed_data <- mice(dataset, m=5, method="pmm", seed=123)
+dataset <- complete(imputed_data)
+
+```
+
+
+
+# Task Two: Build prediction models
+
+```{r}
+#Train-Test split
+set.seed(123)
+
+data_split <- initial_split(dataset,prop=0.8,strata=stroke)
+train_data <- training(data_split)
+test_data <- testing(data_split)
+
+#Recipe(Preprocessing Pipeline)
+stroke_recipe <- recipe(stroke ~ ., data=train_data) %>%
+  step_impute_median(bmi) %>%   
+  step_dummy(all_nominal_predictors()) %>%
+  step_normalize(all_numeric_predictors()) %>%
+  step_smote(stroke)
+
+
+#Model 1 - Logistic Regression
+log_model <- logistic_reg() %>%
+  set_engine("glm") %>%
+  set_mode("classification")
+
+log_workflow <- workflow() %>%
+  add_recipe(stroke_recipe) %>%
+  add_model(log_model)
+
+log_fit <- fit(log_workflow,data=train_data)
+saveRDS(log_fit, "log_fit.rds")
+
+
+#Model 2 - Random Forest
+rf_model <- rand_forest(trees=500) %>%
+  set_engine("ranger") %>%
+  set_mode("classification")
+
+rf_workflow <- workflow() %>%
+  add_recipe(stroke_recipe) %>%
+  add_model(rf_model)
+
+rf_fit <- fit(rf_workflow, data=train_data)
+
+```
+
+
+
+
+# Task Three: Evaluate and select prediction models
+
+```{r}
+#Predict on test set
+log_pred <- predict(log_fit, test_data, type="prob") %>%
+  bind_cols(predict(log_fit, test_data)) %>%
+  bind_cols(test_data)
+
+rf_pred <- predict(rf_fit, test_data, type="prob") %>%
+  bind_cols(predict(rf_fit, test_data)) %>%
+  bind_cols(test_data)
+
+#Metrices
+metrics(log_pred, truth=stroke, estimate=.pred_class)
+roc_auc(log_pred, truth=stroke, .pred_1)
+
+metrics(rf_pred, truth=stroke, estimate=.pred_class)
+roc_auc(rf_pred, truth=stroke, .pred_1)
+
+conf_mat(log_pred, truth=stroke, estimate=.pred_class)
+
+```
+
+
+
+# Task Four: Deploy the prediction model
+
+```{r}
+
+```
+
+
+
+
+# Task Five: Findings and Conclusions
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
